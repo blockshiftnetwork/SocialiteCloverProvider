@@ -9,7 +9,15 @@ use SocialiteProviders\Manager\OAuth2\User;
 
 class Provider extends AbstractProvider
 {
-    public const IDENTIFIER = 'clover';
+    /**
+     * Unique Provider Identifier.
+     */
+    const IDENTIFIER = 'clover';
+
+    /**
+     * {@inheritdoc}
+     */
+    protected $scopes = [];
 
     /**
      * Indicates if the session state should be utilized.
@@ -34,37 +42,58 @@ class Provider extends AbstractProvider
     {
         $response = $this->getHttpClient()->post($this->getTokenUrl(), [
             RequestOptions::HEADERS => $this->getTokenHeaders($code),
-            RequestOptions::JSON    => $this->getTokenFields($code),
+            RequestOptions::JSON => $this->getTokenFields($code),
         ]);
 
-        return json_decode((string) $response->getBody(), true);
+        return json_decode($response->getBody(), true);
     }
 
     protected function getApiDomain(): string
     {
         return match ($this->getConfig('environment')) {
-            'sandbox'       => 'sandbox.dev.clover.com',
-            'europe'        => 'api.eu.clover.com',
+            'sandbox' => 'sandbox.dev.clover.com',
+            'europe' => 'api.eu.clover.com',
             'latin_america' => 'api.la.clover.com',
-            default         => 'api.clover.com',
+            default => 'api.clover.com',
         };
     }
 
+    /**
+     * {@inheritdoc}
+     */
     protected function getAuthUrl($state): string
     {
-        return $this->buildAuthUrlFromBase(sprintf('https://%s/oauth/v2/authorize', $this->getApiDomain()), $state);
+        return $this->buildAuthUrlFromBase(
+            sprintf('https://%s/oauth/v2/authorize', $this->getApiDomain()),
+            $state
+        );
     }
 
+    /**
+     * {@inheritdoc}
+     */
     protected function getTokenUrl(): string
     {
         $domain = match ($this->getConfig('environment')) {
-            'sandbox'       => 'apisandbox.dev.clover.com',
-            'europe'        => 'eu.clover.com',
+            'sandbox' => 'apisandbox.dev.clover.com',
+            'europe' => 'eu.clover.com',
             'latin_america' => 'la.clover.com',
-            default         => 'api.clover.com',
+            default => 'api.clover.com',
         };
 
         return sprintf('https://%s/oauth/v2/token', $domain);
+    }
+
+    protected function getRefreshUrl(): string
+    {
+        $domain = match ($this->getConfig('environment')) {
+            'sandbox' => 'apisandbox.dev.clover.com',
+            'europe' => 'eu.clover.com',
+            'latin_america' => 'la.clover.com',
+            default => 'api.clover.com',
+        };
+
+        return sprintf('https://%s/oauth/v2/refresh', $domain);
     }
 
     /**
@@ -78,7 +107,7 @@ class Provider extends AbstractProvider
             $this->request->query('merchant_id'),
             $this->request->query('employee_id'),
         ), [
-            RequestOptions::HEADERS => [
+            'headers' => [
                 'Authorization' => 'Bearer '.$token,
             ],
         ]);
@@ -91,12 +120,12 @@ class Provider extends AbstractProvider
      */
     protected function mapUserToObject(array $user)
     {
-        return (new User)->setRaw($user)->map([
-            'id'       => $user['id'],
+        return (new User())->setRaw($user)->map([
+            'id' => $user['id'],
             'nickname' => $user['name'],
-            'name'     => $user['name'],
-            'email'    => $user['email'],
-            'avatar'   => null,
+            'name' => $user['name'],
+            'email' => $user['email'],
+            'avatar' => null,
         ]);
     }
 
@@ -109,5 +138,26 @@ class Provider extends AbstractProvider
     protected function parseExpiresIn($body)
     {
         return (string) (Arr::get($body, 'access_token_expiration') - time());
+    }
+
+    /**
+     * Get the refresh token response for the given refresh token.
+     *
+     * @param  string  $refreshToken
+     * @return array
+     */
+    protected function getRefreshTokenResponse($refreshToken)
+    {
+        $response = json_decode($this->getHttpClient()->post($this->getRefreshUrl(), [
+            RequestOptions::HEADERS => ['Accept' => 'application/json'],
+            RequestOptions::JSON => [
+                'refresh_token' => $refreshToken,
+                'client_id' => $this->clientId,
+            ],
+        ])->getBody(), true);
+
+        $response['expires_in'] = $this->parseExpiresIn($response);
+        
+        return $response;
     }
 }
